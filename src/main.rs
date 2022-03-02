@@ -12,37 +12,48 @@ impl std::error::Error for MessageError {}
 
 fn estimate_stack_alloc_size(
     body: wasmparser::FunctionBody,
+    stack_ptr_global_idx: u32,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     use wasmparser::Operator;
     let mut op_reader = body.get_operators_reader()?;
-    match op_reader.read()? {
-        Operator::GlobalGet { global_index: 0 } => {}
-        op => {
-            return Err(Box::new(MessageError(format!(
-                "not produced by LLVM: missing global.get but got {:?}",
-                op
-            ))))
-        }
-    };
-    let size = match op_reader.read()? {
-        Operator::LocalSet { .. } => match op_reader.read()? {
-            Operator::I32Const { value } => value,
-            op => {
-                return Err(Box::new(MessageError(format!(
-                    "not produced by LLVM: missing i32.const but got {:?}",
-                    op
-                ))))
+    while let Ok(op) = op_reader.read() {
+        match op {
+            Operator::GlobalGet { global_index } if global_index == stack_ptr_global_idx => {}
+            _ => continue,
+        };
+        let value = match op_reader.read()? {
+            Operator::I32Const { value } => {
+                match op_reader.read()? {
+                    Operator::I32Sub => {}
+                    Operator::LocalTee { .. } => {
+                        if let Operator::I32Sub = op_reader.read()? {
+                        } else {
+                            continue;
+                        }
+                    }
+                    _ => {
+                        continue;
+                    }
+                }
+                if let Operator::LocalTee { .. } = op_reader.read()? {
+                } else {
+                    continue;
+                }
+                if let Operator::GlobalSet { global_index } = op_reader.read()? {
+                    if global_index == stack_ptr_global_idx {
+                        value
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
             }
-        },
-        Operator::I32Const { value } => value,
-        op => {
-            return Err(Box::new(MessageError(format!(
-                "not produced by LLVM: missing local.set or i32.const but got {:?}",
-                op
-            ))))
-        }
-    };
-    Ok(size as usize)
+            _ => continue,
+        };
+        return Ok(value as usize);
+    }
+    Err(Box::new(MessageError("prologue not found".to_string())))
 }
 
 fn collect_func_names(
@@ -77,6 +88,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut binary_file = File::open(&args[1])?;
     let stacktrace_path = File::open(&args[2])?;
+    let stack_ptr_global_idx = if args.len() >= 4 {
+        args[3].parse::<u32>().expect("invalid sp global index")
+    } else {
+        0
+    };
     let mut size_by_idx = Vec::new();
     let mut func_names = HashMap::new();
     let mut func_idx_base = 0;
@@ -101,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Payload::CodeSectionEntry(body) => {
-                size_by_idx.push(estimate_stack_alloc_size(body));
+                size_by_idx.push(estimate_stack_alloc_size(body, stack_ptr_global_idx));
             }
             Payload::CustomSection {
                 name,
