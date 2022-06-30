@@ -36,7 +36,7 @@ fn collect_instr_until_set_sp<'body>(
             if global_index == stack_ptr_global_idx {
                 if find_alloca(&mut op_reader, stack_ptr_global_idx) {
                     return Err(Box::new(MessageError(
-                        "found more global.set!!".to_string(),
+                        "more than two set operation for stack pointer found".to_string(),
                     )));
                 }
                 return Ok(());
@@ -231,7 +231,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(Ok(size)) => size,
             Some(Err(e)) => {
                 if known_failed.insert(line.clone()) {
-                    eprintln!("couldn't estimate stack size {} ({:})", line, e);
+                    eprintln!("can't estimate stack size for '{}' ({:})", line, e);
                 }
                 continue;
             }

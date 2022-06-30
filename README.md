@@ -2,46 +2,82 @@
 
 A simple binary analyzer for stack allocation size in WebAssembly based on LLVM code generation.
 
+## Installation
+
+With Rust's package manager cargo, you can install via:
+
+```console
+$ cargo install --git https://github.com/kateinoigakukun/wasm-stack-consumer
+$ wasm-stack-consumer --help
+```
+
 ## Usage
 
+### 1. Prepare list of functions to analyze
+
 First, you need to prepare a list of function names you want to know the stack alloc size.
+This list is usually taken from the stack trace at the crash point. Some standalone WebAssembly runtime like `wasmtime` and browsers provide this information. You may need to manually format the provided raw call stack into a list of function names by trimming unnecessary information like code address location and prefix '$' added to every wasm function name.
 
 ```
 $ cat callstack.log
-swift::SubstGenericParametersFromMetadata::setup() const
-swift::TargetMetadata<swift::InProcess> const* std::__2::__function::__policy_invoker<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>::__call_impl<std::__2::__function::__default_alloc_func<swift_getTypeByMangledNameInContext::$_5, swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)> >(std::__2::__function::__policy_storage const*, unsigned int, unsigned int)
-swift::Demangle::TypeDecoder<(anonymous namespace)::DecodedMetadataBuilder>::decodeMangledType(swift::Demangle::Node*)
-swift::Demangle::TypeDecoder<(anonymous namespace)::DecodedMetadataBuilder>::decodeMangledType(swift::Demangle::Node*)
-swift::Demangle::TypeDecoder<(anonymous namespace)::DecodedMetadataBuilder>::decodeMangledType(swift::Demangle::Node*)
-swift::Demangle::TypeDecoder<(anonymous namespace)::DecodedMetadataBuilder>::decodeMangledType(swift::Demangle::Node*)
-swift_getTypeByMangledNodeImpl(swift::MetadataRequest, swift::Demangle::Demangler&, swift::Demangle::Node*, void const* const*, std::__2::function<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>, std::__2::function<swift::TargetWitnessTable<swift::InProcess> const* (swift::TargetMetadata<swift::InProcess> const*, unsigned int)>)
-swift::swift_getTypeByMangledNode(swift::MetadataRequest, swift::Demangle::Demangler&, swift::Demangle::Node*, void const* const*, std::__2::function<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>, std::__2::function<swift::TargetWitnessTable<swift::InProcess> const* (swift::TargetMetadata<swift::InProcess> const*, unsigned int)>)
-swift_getTypeByMangledNameImpl(swift::MetadataRequest, llvm::StringRef, void const* const*, std::__2::function<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>, std::__2::function<swift::TargetWitnessTable<swift::InProcess> const* (swift::TargetMetadata<swift::InProcess> const*, unsigned int)>)
-swift::swift_getTypeByMangledName(swift::MetadataRequest, llvm::StringRef, void const* const*, std::__2::function<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>, std::__2::function<swift::TargetWitnessTable<swift::InProcess> const* (swift::TargetMetadata<swift::InProcess> const*, unsigned int)>)
-swift_getTypeByMangledNameInContext
-$sSP11TokamakCoreAA11FieldRecordVRszlE4type14genericContext0F9ArgumentsypXpSVSg_AGtF
-...
+_swift_stdlib_fwrite_stdout
+$sSS8withUTF8yxxSRys5UInt8VGKXEKlFSi_Tg507$sSRys5c67VGSis5Error_pIgydzo_ACSisAD_pIegyrzo_TR030$ss7_StdoutV5writeyySSFSiE18A7VGXEfU_Tf3nnpf_nTf1cn_n
+$ss6_print_9separator10terminator2toySayypG_S2Sxzts16TextOutputStreamRzlFs7_StdoutV_Tg5
+$ss5print_9separator10terminatoryypd_S2StFTm
+$ss5print_9separator10terminatoryypd_S2StF
+main
 ```
 
-Then, this analyzer can tell you the size of stack allocation for each function
+<details>
+<summary>Original stack trace from Google Chrome</summary>
+
+It contains non-WebAssembly function names like `wasiObject.wasiImport.<computed>`, and also some WebAssembly function names like `$_swift_stdlib_fwrite_stdout`.
+WebAssembly function names are prefixed with `$` to distinguish them from non-WebAssembly function names.
+
+And each frame line contains the code address location `(<file>:<line>)` at the end.
 
 ```
-$ cargo run -- main.wasm callstack.log
-func[62140] size = 304 swift::SubstGenericParametersFromMetadata::buildDescriptorPath(swift::TargetContextDescriptor<swift::InProcess> const*, swift::Demangle::__runtime::Demangler&) const
-func[62140] size = 304 swift::SubstGenericParametersFromMetadata::buildDescriptorPath(swift::TargetContextDescriptor<swift::InProcess> const*, swift::Demangle::__runtime::Demangler&) const
-func[62140] size = 304 swift::SubstGenericParametersFromMetadata::buildDescriptorPath(swift::TargetContextDescriptor<swift::InProcess> const*, swift::Demangle::__runtime::Demangler&) const
-func[62142] size = 2352 swift::SubstGenericParametersFromMetadata::setup() const
-couldn't estimate stack size swift::TargetMetadata<swift::InProcess> const* std::__2::__function::__policy_invoker<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>::__call_impl<std::__2::__function::__default_alloc_func<swift_getTypeByMangledNameInContext::$_5, swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)> >(std::__2::__function::__policy_storage const*, unsigned int, unsigned int) (not produced by LLVM: missing global.get but got LocalGet { local_index: 0 }
-func[62162] size = 736 swift::Demangle::__runtime::TypeDecoder<(anonymous namespace)::DecodedMetadataBuilder>::decodeMangledType(swift::Demangle::__runtime::Node*)
-func[62162] size = 736 swift::Demangle::__runtime::TypeDecoder<(anonymous namespace)::DecodedMetadataBuilder>::decodeMangledType(swift::Demangle::__runtime::Node*)
-func[62162] size = 736 swift::Demangle::__runtime::TypeDecoder<(anonymous namespace)::DecodedMetadataBuilder>::decodeMangledType(swift::Demangle::__runtime::Node*)
-func[62162] size = 736 swift::Demangle::__runtime::TypeDecoder<(anonymous namespace)::DecodedMetadataBuilder>::decodeMangledType(swift::Demangle::__runtime::Node*)
-func[62160] size = 80 swift_getTypeByMangledNodeImpl(swift::MetadataRequest, swift::Demangle::__runtime::Demangler&, swift::Demangle::__runtime::Node*, void const* const*, std::__2::function<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>, std::__2::function<swift::TargetWitnessTable<swift::InProcess> const* (swift::TargetMetadata<swift::InProcess> const*, unsigned int)>)
-func[62158] size = 64 swift::swift_getTypeByMangledNode(swift::MetadataRequest, swift::Demangle::__runtime::Demangler&, swift::Demangle::__runtime::Node*, void const* const*, std::__2::function<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>, std::__2::function<swift::TargetWitnessTable<swift::InProcess> const* (swift::TargetMetadata<swift::InProcess> const*, unsigned int)>)
-func[62123] size = 2432 swift_getTypeByMangledNameImpl(swift::MetadataRequest, __swift::__runtime::llvm::StringRef, void const* const*, std::__2::function<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>, std::__2::function<swift::TargetWitnessTable<swift::InProcess> const* (swift::TargetMetadata<swift::InProcess> const*, unsigned int)>)
-func[62121] size = 64 swift::swift_getTypeByMangledName(swift::MetadataRequest, __swift::__runtime::llvm::StringRef, void const* const*, std::__2::function<swift::TargetMetadata<swift::InProcess> const* (unsigned int, unsigned int)>, std::__2::function<swift::TargetWitnessTable<swift::InProcess> const* (swift::TargetMetadata<swift::InProcess> const*, unsigned int)>)
-func[62127] size = 272 swift_getTypeByMangledNameInContext
-func[32872] size = 16 $sSP11TokamakCoreAA11FieldRecordVRszlE4type14genericContext0F9ArgumentsypXpSVSg_AGtF
-...
-Total size: 56224
+wasmFs.fs.writeSync (dev.js:8982)
+(anonymous) (dev.js:2485)
+(anonymous) (dev.js:2483)
+(anonymous) (dev.js:2174)
+wasiObject.wasiImport.<computed> (dev.js:9005)
+$__wasi_fd_write (01c5d406:0x40fff6)
+$writev (01c5d406:0x410760)
+$__stdio_write (01c5d406:0x4107ea)
+$__stdout_write (01c5d406:0x414f29)
+$fwrite (01c5d406:0x4105a9)
+$_swift_stdlib_fwrite_stdout (01c5d406:0x3c743a)
+$$sSS8withUTF8yxxSRys5UInt8VGKXEKlFSi_Tg507$sSRys5c67VGSis5Error_pIgydzo_ACSisAD_pIegyrzo_TR030$ss7_StdoutV5writeyySSFSiE18A7VGXEfU_Tf3nnpf_nTf1cn_n (01c5d406:0xa3aee)
+$$ss6_print_9separator10terminator2toySayypG_S2Sxzts16TextOutputStreamRzlFs7_StdoutV_Tg5 (01c5d406:0x1abcec)
+$$ss5print_9separator10terminatoryypd_S2StFTm (01c5d406:0x1abdf9)
+$$ss5print_9separator10terminatoryypd_S2StF (01c5d406:0x1a9f82)
+$main (main.swift:1)
+run (dev.js:8954)
 ```
+
+</details>
+
+### 2. Analyze stack allocations
+
+
+Then, this analyzer can tell you the size of stack allocation for each function. You need to provide the `.wasm` file with debug info (especially `name` section) and the list of functions you want to analyze.
+
+Some of functions in the given list may be missing due to the limitation of stack size estimation.
+Diagnostics for such missing functions are printed to stderr.
+
+```
+$ cargo run -- main.wasm callstack.log 2> /dev/null
+func[6757] size = 16 $ss5print_9separator10terminatoryypd_S2StFTm
+func[24949] size = 144 main
+Total size: 160
+```
+
+
+## How it works
+
+This tool analyzes functions in `.wasm` program and estimates the stack allocation size for each function by emulating stack pointer operations.
+
+LLVM generates "shadow stack" to put local variables referenced through pointers for C-family languages. The stack pointer for the shadow stack `__stack_pointer` is stored in the `global` space of the `.wasm` program. Usually stored in the `globals[0]` since other language features rarely use `global` space.
+
+This tool emulates the WebAssembly instructions between reading `__stack_pointer` and writing back to it.
